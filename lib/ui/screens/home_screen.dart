@@ -11,6 +11,9 @@ import '../../providers/group_providers.dart';
 import '../../providers/profile_providers.dart';
 import '../../repositories/contact_repository.dart';
 import '../../utils/qr_utils.dart';
+import '../screens/qr_scan_screen.dart';
+import '../../utils/mecard_parser.dart';
+import '../../utils/phone_launcher.dart';
 
 import '../widgets/contact_card_grid.dart';
 import '../widgets/contact_card_list.dart';
@@ -19,7 +22,93 @@ import '../modals/group_modal.dart';
 import '../modals/profile_modal.dart';
 
 class HomeScreen extends ConsumerWidget {
+  Future<bool> _askCallNow(BuildContext context, String phone) async {
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (_) => AlertDialog(
+      title: const Text('Gọi điện?'),
+      content: Text('Bạn có muốn gọi ngay số $phone không?'),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Không')),
+        ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('Gọi')),
+      ],
+    ),
+  );
+  return ok == true;
+}
+  Future<String?> _askDuplicateAction(BuildContext context, String phone, String existingName) {
+  return showDialog<String>(
+    context: context,
+    builder: (_) => AlertDialog(
+      title: const Text('Trùng số điện thoại'),
+      content: Text('SĐT $phone đã tồn tại (liên hệ: $existingName). Bạn muốn làm gì?'),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, 'cancel'),
+          child: const Text('Hủy'),
+        ),
+        OutlinedButton(
+          onPressed: () => Navigator.pop(context, 'create_new'),
+          child: const Text('Tạo mới'),
+        ),
+        ElevatedButton(
+          onPressed: () => Navigator.pop(context, 'update'),
+          child: const Text('Cập nhật'),
+        ),
+      ],
+    ),
+  );
+}
+  void _showQrSheet(BuildContext context, {required String title, required String data}) {
+  showModalBottomSheet(
+    context: context,
+    isScrollControlled: true,
+    showDragHandle: true,
+    builder: (_) {
+      final dark = Theme.of(context).brightness == Brightness.dark;
+      return SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 16),
+              Container(
+                width: 240,
+                height: 240,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: dark ? const Color(0xFF1E293B) : Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: dark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+                ),
+                child: Center(
+                  child: QrImageView(
+                    data: data,
+                    size: 200,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                data,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 12, color: dark ? Colors.grey[400] : Colors.grey[700]),
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      );
+    },
+  );
+}
   const HomeScreen({super.key});
+
+  // Drawer mở bằng nút 3 gạch
+  static final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
   void _openAdd(WidgetRef ref, List<Group> groups) {
     ref.read(panelStateProvider.notifier).state =
@@ -35,14 +124,18 @@ class HomeScreen extends ConsumerWidget {
     );
   }
 
+  void _openDrawer() {
+    _scaffoldKey.currentState?.openDrawer();
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final dark      = ref.watch(darkModeProvider);
-    final profile   = ref.watch(profileStreamProvider).maybeWhen(data: (d) => d, orElse: () => null);
-    final groups    = ref.watch(groupsStreamProvider).maybeWhen(data: (d) => d, orElse: () => <Group>[]);
-    final panel     = ref.watch(panelStateProvider);
-    final search    = ref.watch(searchProvider);
-    final viewMode  = ref.watch(viewModeProvider);
+    final dark = ref.watch(darkModeProvider);
+    final profile = ref.watch(profileStreamProvider).maybeWhen(data: (d) => d, orElse: () => null);
+    final groups = ref.watch(groupsStreamProvider).maybeWhen(data: (d) => d, orElse: () => <Group>[]);
+    final panel = ref.watch(panelStateProvider);
+    final search = ref.watch(searchProvider);
+    final viewMode = ref.watch(viewModeProvider);
     final activeTab = ref.watch(activeTabProvider);
 
     // Danh sách đã lọc để hiển thị nội dung
@@ -52,221 +145,195 @@ class HomeScreen extends ConsumerWidget {
     final allContactsAsync = ref.watch(contactsStreamProvider);
     final allContacts = allContactsAsync.maybeWhen(data: (d) => d, orElse: () => <Contact>[]);
 
-    final totalAll      = allContacts.length;
+    final totalAll = allContacts.length;
     final favoritesCount = allContacts.where((c) => c.isFavorite).length;
 
     return Scaffold(
-      body: Row(
-        children: [
-          _sidebar(
+      key: _scaffoldKey,
+
+      // Sidebar giờ là Drawer: mọi thiết bị đều ẩn, bấm 3 gạch mới hiện
+      drawer: Drawer(
+        child: SafeArea(
+          child: _sidebar(
             context: context,
             ref: ref,
             profile: profile,
             groups: groups,
-            totalAll: totalAll,            // dùng tổng thực tế
-            favoritesCount: favoritesCount,// dùng tổng yêu thích thực tế
+            totalAll: totalAll,
+            favoritesCount: favoritesCount,
             activeTab: activeTab,
             dark: dark,
           ),
-          Expanded(
-            child: Stack(
-              children: [
-                Column(
-                  children: [
-                    _topBar(context, ref, search),
-                    Expanded(
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(48, 0, 48, 0),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const SizedBox(height: 32),
-                            Text(
-                              activeTab == 'favorites'
-                                  ? 'Danh bạ yêu thích'
-                                  : activeTab == 'all'
-                                      ? 'Tất cả danh bạ'
-                                      : 'Nhóm ${groups.firstWhere(
-                                          (g) => g.id == activeTab,
+        ),
+      ),
+
+      body: Stack(
+        children: [
+          Column(
+            children: [
+              _topBar(context, ref, search),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(48, 0, 48, 0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const SizedBox(height: 32),
+                      Text(
+                        activeTab == 'favorites'
+                            ? 'Danh bạ yêu thích'
+                            : activeTab == 'all'
+                                ? 'Tất cả danh bạ'
+                                : 'Nhóm ${groups.firstWhere(
+                                    (g) => g.id == activeTab,
+                                    orElse: () => Group(
+                                      id: 'none',
+                                      label: 'Đã xóa',
+                                      color: 'gray',
+                                      icon: 'tag',
+                                    ),
+                                  ).label}',
+                        style: const TextStyle(
+                          fontSize: 26,
+                          fontWeight: FontWeight.bold,
+                          height: 1.2,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Đang hiển thị ${filteredContacts.length} liên hệ',
+                        style: TextStyle(
+                          color: Colors.grey[600],
+                          fontSize: 13,
+                        ),
+                      ),
+                      const SizedBox(height: 32),
+                      Expanded(
+                        child: filteredContacts.isEmpty
+                            ? Center(
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(Icons.search_off, size: 72, color: Colors.grey),
+                                    const SizedBox(height: 16),
+                                    const Text('Chưa có dữ liệu phù hợp'),
+                                    if (activeTab != 'all')
+                                      TextButton(
+                                        onPressed: () => ref.read(activeTabProvider.notifier).state = 'all',
+                                        child: const Text('Quay về tất cả'),
+                                      )
+                                  ],
+                                ),
+                              )
+                            : Builder(
+                                builder: (context) {
+                                  if (viewMode == 'list') {
+                                    return ListView.separated(
+                                      padding: const EdgeInsets.only(bottom: 120),
+                                      itemCount: filteredContacts.length,
+                                      separatorBuilder: (_, __) => const SizedBox(height: 12),
+                                      itemBuilder: (_, i) {
+                                        final c = filteredContacts[i];
+                                        final g = groups.firstWhere(
+                                          (x) => x.id == c.groupId,
                                           orElse: () => Group(
                                             id: 'none',
-                                            label: 'Đã xóa',
+                                            label: 'Khác',
                                             color: 'gray',
                                             icon: 'tag',
                                           ),
-                                        ).label}',
-                              style: const TextStyle(
-                                fontSize: 26,
-                                fontWeight: FontWeight.bold,
-                                height: 1.2,
-                              ),
-                            ),
-                            const SizedBox(height: 6),
-                            Text(
-                              'Đang hiển thị ${filteredContacts.length} liên hệ',
-                              style: TextStyle(
-                                color: Colors.grey[600],
-                                fontSize: 13,
-                              ),
-                            ),
-                            const SizedBox(height: 32),
-                            Expanded(
-                              child: filteredContacts.isEmpty
-                                  ? Center(
-                                      child: Column(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          const Icon(Icons.search_off,
-                                              size: 72, color: Colors.grey),
-                                          const SizedBox(height: 16),
-                                          const Text('Chưa có dữ liệu phù hợp'),
-                                          if (activeTab != 'all')
-                                            TextButton(
-                                              onPressed: () => ref
-                                                  .read(activeTabProvider.notifier)
-                                                  .state = 'all',
-                                              child: const Text('Quay về tất cả'),
-                                            )
-                                        ],
-                                      ),
-                                    )
-                                  : LayoutBuilder(
-                                      builder: (context, constraints) {
-                                        if (viewMode == 'list') {
-                                          return ListView.separated(
-                                            padding: const EdgeInsets.only(bottom: 120),
-                                            itemCount: filteredContacts.length,
-                                            separatorBuilder: (_, __) =>
-                                                const SizedBox(height: 12),
-                                            itemBuilder: (_, i) {
-                                              final c = filteredContacts[i];
-                                              final g = groups.firstWhere(
-                                                (x) => x.id == c.groupId,
-                                                orElse: () => Group(
-                                                  id: 'none',
-                                                  label: 'Khác',
-                                                  color: 'gray',
-                                                  icon: 'tag',
-                                                ),
-                                              );
-                                              return ContactListCard(
-                                                contact: c,
-                                                group: g,
-                                                onEdit: () => _openEdit(ref, c),
-                                                onDelete: () async {
-                                                  final repo = ref.read(contactRepositoryProvider);
-                                                  await repo.delete(c.id);
-                                                },
-                                                onQR: () {
-                                                  showDialog(
-                                                    context: context,
-                                                    builder: (_) => AlertDialog(
-                                                      title: const Text('Mã QR Danh Thiếp'),
-                                                      content: QrImageView(
-                                                        data: buildMeCardData(
-                                                          name: c.name,
-                                                          phone: c.phone,
-                                                          email: c.email,
-                                                        ),
-                                                        size: 200,
-                                                      ),
-                                                    ),
-                                                  );
-                                                },
-                                                onToggleFavorite: () async {
-                                                  await ref
-                                                      .read(contactRepositoryProvider)
-                                                      .toggleFavorite(c.id);
-                                                },
-                                              );
+                                        );
+                                        return ContactListCard(
+                                          contact: c,
+                                          group: g,
+                                          onEdit: () => _openEdit(ref, c),
+                                          onDelete: () async {
+                                            final repo = ref.read(contactRepositoryProvider);
+                                            await repo.delete(c.id);
+                                          },
+                                          onQR: () {
+                                              final data = buildMeCardData(name: c.name, phone: c.phone, email: c.email);
+                                              _showQrSheet(context, title: 'Mã QR Danh Thiếp', data: data);
                                             },
-                                          );
-                                        } else {
-                                        return LayoutBuilder(
-  builder: (context, constraints) {
-    final width = constraints.maxWidth;
+                                          onToggleFavorite: () async {
+                                            await ref.read(contactRepositoryProvider).toggleFavorite(c.id);
+                                          },
+                                        );
+                                      },
+                                    );
+                                  } else {
+                                    final width = MediaQuery.of(context).size.width;
 
-    int cross = 3;
-    if (width < 900) cross = 2;
-    if (width < 600) cross = 1;
+                                    int cross = 3;
+                                    if (width < 900) cross = 2;
+                                    if (width < 600) cross = 1;
 
-    final ratio = 0.85;
+                                    const ratio = 0.85;
 
-    return GridView.builder(
-      padding: const EdgeInsets.only(bottom: 80, top: 8),
-      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: cross,
-        crossAxisSpacing: 16,
-        mainAxisSpacing: 20,
-        childAspectRatio: ratio,
-      ),
-      itemCount: filteredContacts.length,
-      itemBuilder: (_, i) {
-        final c = filteredContacts[i];
-        final g = groups.firstWhere(
-          (x) => x.id == c.groupId,
-          orElse: () => Group(id: 'none', label: 'Không nhóm', color: 'gray', icon: 'tag'),
-        );
-        return ContactGridCardExtended(
-          contact: c,
-          group: g,
-          onEdit: () => _openEdit(ref, c),
-          onDelete: () async {
-            final repo = ref.read(contactRepositoryProvider);
-            await repo.delete(c.id);
-          },
-          onQR: () {
-            showDialog(
-              context: context,
-              builder: (_) => AlertDialog(
-                title: const Text('Mã QR Danh Thiếp'),
-                content: QrImageView(
-                  data: buildMeCardData(
-                    name: c.name,
-                    phone: c.phone,
-                    email: c.email,
+                                    return GridView.builder(
+                                      padding: const EdgeInsets.only(bottom: 80, top: 8),
+                                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                                        crossAxisCount: cross,
+                                        crossAxisSpacing: 16,
+                                        mainAxisSpacing: 20,
+                                        childAspectRatio: ratio,
+                                      ),
+                                      itemCount: filteredContacts.length,
+                                      itemBuilder: (_, i) {
+                                        final c = filteredContacts[i];
+                                        final g = groups.firstWhere(
+                                          (x) => x.id == c.groupId,
+                                          orElse: () => Group(
+                                            id: 'none',
+                                            label: 'Không nhóm',
+                                            color: 'gray',
+                                            icon: 'tag',
+                                          ),
+                                        );
+                                        return ContactGridCardExtended(
+                                          contact: c,
+                                          group: g,
+                                          onEdit: () => _openEdit(ref, c),
+                                          onDelete: () async {
+                                            final repo = ref.read(contactRepositoryProvider);
+                                            await repo.delete(c.id);
+                                          },
+                                          onQR: () {
+                                              final data = buildMeCardData(name: c.name, phone: c.phone, email: c.email);
+                                              _showQrSheet(context, title: 'Mã QR Danh Thiếp', data: data);
+                                            },
+                                          onToggleFavorite: () async {
+                                            await ref.read(contactRepositoryProvider).toggleFavorite(c.id);
+                                          },
+                                        );
+                                      },
+                                    );
+                                  }
+                                },
+                              ),
+                      ),
+                    ],
                   ),
-                  size: 200,
                 ),
               ),
-            );
-          },
-          onToggleFavorite: () async {
-            await ref.read(contactRepositoryProvider).toggleFavorite(c.id);
-          },
-        );
-      },
-    );
-  },
-);
-                                        }
-                                      },
-                                    ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                if (panel.open)
-                  Positioned.fill(
-                    child: GestureDetector(
-                      onTap: () {
-                        ref.read(panelStateProvider.notifier).state =
-                            panel.copyWith(open: false);
-                      },
-                      child: Container(
-                        color: Colors.black.withOpacity(.35),
-                      ),
-                    ),
-                  ),
-                if (panel.open) const SidePanel(),
-              ],
-            ),
+            ],
           ),
+
+          if (panel.open)
+            Positioned.fill(
+              child: GestureDetector(
+                onTap: () {
+                  ref.read(panelStateProvider.notifier).state = panel.copyWith(open: false);
+                },
+                child: Container(
+                  color: Colors.black.withOpacity(.35),
+                ),
+              ),
+            ),
+          if (panel.open) const SidePanel(),
         ],
       ),
+
       floatingActionButton: MediaQuery.of(context).size.width < 900
           ? FloatingActionButton(
               onPressed: () => _openAdd(ref, groups),
@@ -307,9 +374,12 @@ class HomeScreen extends ConsumerWidget {
             ref,
             icon: Icons.people,
             label: 'Tất cả liên hệ',
-            count: totalAll, // luôn tổng tất cả
+            count: totalAll,
             active: activeTab == 'all',
-            onTap: () => ref.read(activeTabProvider.notifier).state = 'all',
+            onTap: () {
+              ref.read(activeTabProvider.notifier).state = 'all';
+              Navigator.of(context).maybePop(); // đóng drawer
+            },
             dark: dark,
           ),
           _navItem(
@@ -317,9 +387,12 @@ class HomeScreen extends ConsumerWidget {
             ref,
             icon: Icons.star,
             label: 'Yêu thích',
-            count: favoritesCount, // luôn tổng yêu thích thật
+            count: favoritesCount,
             active: activeTab == 'favorites',
-            onTap: () => ref.read(activeTabProvider.notifier).state = 'favorites',
+            onTap: () {
+              ref.read(activeTabProvider.notifier).state = 'favorites';
+              Navigator.of(context).maybePop(); // đóng drawer
+            },
             dark: dark,
           ),
           _groupsSection(context, ref, groups, activeTab, dark),
@@ -334,22 +407,14 @@ class HomeScreen extends ConsumerWidget {
       padding: const EdgeInsets.all(12),
       child: InkWell(
         onTap: () {
-          if (profile == null) return;
-          showDialog(
-            context: context,
-            builder: (_) => AlertDialog(
-              title: const Text('Mã QR Của Tôi'),
-              content: QrImageView(
-                data: buildMeCardData(
-                  name: profile.name,
-                  phone: profile.phone,
-                  email: profile.email,
-                ),
-                size: 200,
-              ),
-            ),
-          );
-        },
+            if (profile == null) return;
+            final data = buildMeCardData(
+              name: profile.name,
+              phone: profile.phone,
+              email: profile.email,
+            );
+            _showQrSheet(context, title: 'Mã QR Của Tôi', data: data);
+          },
         borderRadius: BorderRadius.circular(28),
         child: Container(
           decoration: BoxDecoration(
@@ -362,9 +427,7 @@ class HomeScreen extends ConsumerWidget {
               CircleAvatar(
                 radius: 30,
                 backgroundColor: const Color(0xFF4F46E5),
-                backgroundImage: profile?.avatarBase64 != null
-                    ? MemoryImage(base64Decode(profile!.avatarBase64!))
-                    : null,
+                backgroundImage: profile?.avatarBase64 != null ? MemoryImage(base64Decode(profile!.avatarBase64!)) : null,
                 child: profile?.avatarBase64 == null
                     ? Text(
                         profile?.name.isNotEmpty == true ? profile!.name[0].toUpperCase() : 'N',
@@ -462,7 +525,10 @@ class HomeScreen extends ConsumerWidget {
                 return Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 4),
                   child: InkWell(
-                    onTap: () => ref.read(activeTabProvider.notifier).state = g.id,
+                    onTap: () {
+                      ref.read(activeTabProvider.notifier).state = g.id;
+                      Navigator.of(context).maybePop(); // đóng drawer
+                    },
                     borderRadius: BorderRadius.circular(16),
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
@@ -470,9 +536,7 @@ class HomeScreen extends ConsumerWidget {
                         borderRadius: BorderRadius.circular(16),
                         color: active ? (dark ? const Color(0xFF1E293B) : Colors.white) : Colors.transparent,
                         border: Border.all(
-                          color: active
-                              ? (dark ? const Color(0xFF334155) : const Color(0xFFE0E7FF))
-                              : Colors.transparent,
+                          color: active ? (dark ? const Color(0xFF334155) : const Color(0xFFE0E7FF)) : Colors.transparent,
                         ),
                       ),
                       child: Row(
@@ -574,9 +638,7 @@ class HomeScreen extends ConsumerWidget {
             borderRadius: BorderRadius.circular(18),
             color: active ? (dark ? const Color(0xFF1E293B) : Colors.white) : Colors.transparent,
             border: Border.all(
-              color: active
-                  ? (dark ? const Color(0xFF334155) : const Color(0xFFE0E7FF))
-                  : Colors.transparent,
+              color: active ? (dark ? const Color(0xFF334155) : const Color(0xFFE0E7FF)) : Colors.transparent,
             ),
             boxShadow: active && !dark
                 ? [
@@ -590,34 +652,32 @@ class HomeScreen extends ConsumerWidget {
           ),
           child: Row(
             children: [
-              Icon(icon, size: 18, color: active ? const Color(0xFF4F46E5) : (dark ? Colors.grey[300] : Colors.grey[700])),
+              Icon(
+                icon,
+                size: 18,
+                color: active ? const Color(0xFF4F46E5) : (dark ? Colors.grey[300] : Colors.grey[700]),
+              ),
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
                   label,
                   style: TextStyle(
                     fontWeight: FontWeight.w600,
-                    color: active
-                        ? (dark ? Colors.white : const Color(0xFF1E293B))
-                        : (dark ? Colors.grey[300] : Colors.grey[700]),
+                    color: active ? (dark ? Colors.white : const Color(0xFF1E293B)) : (dark ? Colors.grey[300] : Colors.grey[700]),
                   ),
                 ),
               ),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: active
-                      ? const Color(0xFFEEF2FF)
-                      : (dark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9)),
+                  color: active ? const Color(0xFFEEF2FF) : (dark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9)),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
                   '$count',
                   style: TextStyle(
                     fontSize: 12,
-                    color: active
-                        ? const Color(0xFF4F46E5)
-                        : (dark ? Colors.grey[300] : Colors.grey[600]),
+                    color: active ? const Color(0xFF4F46E5) : (dark ? Colors.grey[300] : Colors.grey[600]),
                   ),
                 ),
               )
@@ -629,43 +689,177 @@ class HomeScreen extends ConsumerWidget {
   }
 
   Widget _topBar(BuildContext context, WidgetRef ref, String search) {
-    final dark = Theme.of(context).brightness == Brightness.dark;
-    final viewMode = ref.watch(viewModeProvider);
-    return Container(
-      padding: const EdgeInsets.fromLTRB(48, 24, 48, 16),
-      decoration: BoxDecoration(
-        color: Colors.transparent,
-        border: Border(
-          bottom: BorderSide(
-            color: dark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
-          ),
+  final dark = Theme.of(context).brightness == Brightness.dark;
+  final viewMode = ref.watch(viewModeProvider);
+  final width = MediaQuery.of(context).size.width;
+  final isMobile = width < 600;
+
+  return Container(
+    padding: EdgeInsets.fromLTRB(isMobile ? 12 : 24, 16, isMobile ? 12 : 48, 12),
+    decoration: BoxDecoration(
+      color: Colors.transparent,
+      border: Border(
+        bottom: BorderSide(
+          color: dark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
         ),
       ),
-      child: Row(
-        children: [
-          Expanded(
-            child: SizedBox(
-              height: 52,
-              child: TextField(
-                decoration: InputDecoration(
-                  prefixIcon: const Icon(Icons.search),
-                  hintText: 'Tìm kiếm danh bạ...',
-                  filled: true,
-                  fillColor: dark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(18),
-                    borderSide: BorderSide(color: dark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(18),
-                    borderSide: const BorderSide(color: Color(0xFF6366F1), width: 2),
-                  ),
+    ),
+    child: Row(
+      children: [
+        IconButton(
+          tooltip: 'Menu',
+          onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+          icon: Icon(Icons.menu, color: dark ? Colors.grey[200] : Colors.grey[800]),
+        ),
+        const SizedBox(width: 8),
+
+        // Search luôn ưu tiên chiếm chỗ
+        Expanded(
+          child: SizedBox(
+            height: 44,
+            child: TextField(
+              decoration: InputDecoration(
+                prefixIcon: const Icon(Icons.search),
+                hintText: 'Tìm kiếm...',
+                filled: true,
+                fillColor: dark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+                contentPadding: const EdgeInsets.symmetric(vertical: 0, horizontal: 12),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  borderSide: BorderSide(color: dark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
                 ),
-                onChanged: (v) => ref.read(searchProvider.notifier).state = v,
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  borderSide: const BorderSide(color: Color(0xFF6366F1), width: 2),
+                ),
               ),
+              onChanged: (v) => ref.read(searchProvider.notifier).state = v,
             ),
           ),
-          const SizedBox(width: 16),
+        ),
+
+        const SizedBox(width: 8),
+
+        // Toggle grid/list: mobile dùng icon nhỏ, desktop giữ container
+        if (isMobile) ...[
+          IconButton(
+            tooltip: 'Grid',
+            onPressed: () => ref.read(viewModeProvider.notifier).state = 'grid',
+            icon: Icon(Icons.grid_view, color: viewMode == 'grid' ? const Color(0xFF4F46E5) : (dark ? Colors.grey[400] : Colors.grey[600])),
+          ),
+          IconButton(
+            tooltip: 'List',
+            onPressed: () => ref.read(viewModeProvider.notifier).state = 'list',
+            icon: Icon(Icons.view_list, color: viewMode == 'list' ? const Color(0xFF4F46E5) : (dark ? Colors.grey[400] : Colors.grey[600])),
+          ),
+
+          // QR icon
+          IconButton(
+            tooltip: 'Quét QR',
+            onPressed: () async {
+              final raw = await Navigator.push<String>(
+                context,
+                MaterialPageRoute(builder: (_) => const QrScanScreen()),
+              );
+              if (raw == null || raw.trim().isEmpty) return;
+
+              final mecard = parseMeCard(raw);
+              if (mecard == null) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('QR không đúng định dạng danh thiếp (MECARD)')),
+                  );
+                }
+                return;
+              }
+
+              final repo = ref.read(contactRepositoryProvider);
+
+              // Lấy list hiện có để check trùng SĐT
+              final allContacts = ref.read(contactsStreamProvider).maybeWhen(data: (d) => d, orElse: () => <Contact>[]);
+              final existing = allContacts.where((c) => c.phone.trim() == mecard.phone.trim()).toList();
+
+              try {
+                if (existing.isNotEmpty) {
+                  final picked = existing.first; // nếu có nhiều cái trùng, lấy cái đầu để update
+                  final action = await _askDuplicateAction(context, mecard.phone, picked.name);
+
+                  if (action == null || action == 'cancel') return;
+
+                  if (action == 'update') {
+                    // update liên hệ cũ: giữ group/favorite/avatar hiện tại
+                    picked.name = mecard.name;
+                    picked.email = mecard.email;
+                    // phone giữ nguyên (trùng rồi)
+                    await repo.update(picked);
+
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Đã cập nhật: ${picked.name}')),
+                      );
+                    }
+                  } else if (action == 'create_new') {
+                    final c = Contact(
+                      name: mecard.name,
+                      phone: mecard.phone,
+                      email: mecard.email,
+                      groupId: 'none',
+                      isFavorite: false,
+                      avatarBase64: null,
+                    );
+                    await repo.add(c);
+
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Đã thêm mới: ${mecard.name}')),
+                      );
+                    }
+                  }
+                } else {
+                  final c = Contact(
+                    name: mecard.name,
+                    phone: mecard.phone,
+                    email: mecard.email,
+                    groupId: 'none',
+                    isFavorite: false,
+                    avatarBase64: null,
+                  );
+                  await repo.add(c);
+
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Đã thêm liên hệ: ${mecard.name}')),
+                    );
+                  }
+                }
+
+                // hỏi gọi luôn
+                if (!context.mounted) return;
+                final callNow = await _askCallNow(context, mecard.phone);
+                if (callNow) {
+                  await callPhone(mecard.phone);
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Lỗi xử lý QR: $e')),
+                  );
+                }
+              }
+            },
+            icon: const Icon(Icons.qr_code_scanner),
+          ),
+
+          // Add icon (mobile)
+          IconButton(
+            tooltip: 'Thêm mới',
+            onPressed: () {
+              final groupsLocal = ref.watch(groupsStreamProvider).maybeWhen(data: (d) => d, orElse: () => <Group>[]);
+              _openAdd(ref, groupsLocal);
+            },
+            icon: const Icon(Icons.add),
+          ),
+        ] else ...[
           Container(
             height: 52,
             padding: const EdgeInsets.symmetric(horizontal: 4),
@@ -681,9 +875,7 @@ class HomeScreen extends ConsumerWidget {
                   onPressed: () => ref.read(viewModeProvider.notifier).state = 'grid',
                   icon: Icon(
                     Icons.grid_view,
-                    color: viewMode == 'grid'
-                        ? const Color(0xFF4F46E5)
-                        : (dark ? Colors.grey[400] : Colors.grey[600]),
+                    color: viewMode == 'grid' ? const Color(0xFF4F46E5) : (dark ? Colors.grey[400] : Colors.grey[600]),
                   ),
                 ),
                 IconButton(
@@ -691,9 +883,7 @@ class HomeScreen extends ConsumerWidget {
                   onPressed: () => ref.read(viewModeProvider.notifier).state = 'list',
                   icon: Icon(
                     Icons.view_list,
-                    color: viewMode == 'list'
-                        ? const Color(0xFF4F46E5)
-                        : (dark ? Colors.grey[400] : Colors.grey[600]),
+                    color: viewMode == 'list' ? const Color(0xFF4F46E5) : (dark ? Colors.grey[400] : Colors.grey[600]),
                   ),
                 ),
               ],
@@ -706,9 +896,7 @@ class HomeScreen extends ConsumerWidget {
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
             ),
             onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Mock quét QR...')),
-              );
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Mock quét QR...')));
             },
             icon: const Icon(Icons.qr_code_scanner),
             label: const Text('Quét QR'),
@@ -729,9 +917,10 @@ class HomeScreen extends ConsumerWidget {
             label: const Text('Thêm Mới', style: TextStyle(fontWeight: FontWeight.bold)),
           ),
         ],
-      ),
-    );
-  }
+      ],
+    ),
+  );
+}
 
   Color _mapColor(String c) {
     switch (c) {

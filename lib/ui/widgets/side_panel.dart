@@ -69,7 +69,7 @@ class _SidePanelState extends ConsumerState<SidePanel> {
       right: 0,
       top: 0,
       bottom: 0,
-      width: 420,
+      width: 400,
       child: Material(
         elevation: 30,
         color: dark ? const Color(0xFF0F172A) : Colors.white,

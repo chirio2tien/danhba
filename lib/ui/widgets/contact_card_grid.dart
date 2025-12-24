@@ -1,7 +1,10 @@
 import 'dart:convert';
+
 import 'package:flutter/material.dart';
+
 import '../../data/schemas/contact.dart';
 import '../../data/schemas/group.dart';
+import '../../utils/phone_launcher.dart';
 
 class ContactGridCardExtended extends StatelessWidget {
   final Contact contact;
@@ -10,6 +13,7 @@ class ContactGridCardExtended extends StatelessWidget {
   final VoidCallback onDelete;
   final VoidCallback onQR;
   final VoidCallback onToggleFavorite;
+
   const ContactGridCardExtended({
     super.key,
     required this.contact,
@@ -20,6 +24,18 @@ class ContactGridCardExtended extends StatelessWidget {
     required this.onToggleFavorite,
   });
 
+  Future<void> _call(BuildContext context) async {
+    try {
+      await callPhone(contact.phone);
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Không gọi được: $e')),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
@@ -29,14 +45,16 @@ class ContactGridCardExtended extends StatelessWidget {
       decoration: BoxDecoration(
         color: dark ? const Color(0xFF1E293B) : Colors.white,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: dark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+        border: Border.all(
+          color: dark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+        ),
       ),
       padding: const EdgeInsets.fromLTRB(18, 20, 18, 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           // Avatar + Favorite
-            Row(
+          Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Stack(
@@ -50,9 +68,7 @@ class ContactGridCardExtended extends StatelessWidget {
                         : null,
                     child: contact.avatarBase64 == null
                         ? Text(
-                            contact.name.isNotEmpty
-                                ? contact.name[0].toUpperCase()
-                                : '?',
+                            contact.name.isNotEmpty ? contact.name[0].toUpperCase() : '?',
                             style: const TextStyle(
                               fontSize: 22,
                               fontWeight: FontWeight.bold,
@@ -78,9 +94,7 @@ class ContactGridCardExtended extends StatelessWidget {
                         child: Icon(
                           Icons.star,
                           size: 18,
-                          color: contact.isFavorite
-                              ? Colors.amber
-                              : (dark ? Colors.grey[400] : Colors.grey[500]),
+                          color: contact.isFavorite ? Colors.amber : (dark ? Colors.grey[400] : Colors.grey[500]),
                         ),
                       ),
                     ),
@@ -89,9 +103,11 @@ class ContactGridCardExtended extends StatelessWidget {
               ),
             ],
           ),
+
           const SizedBox(height: 18),
           _groupBadge(group, dark),
           const SizedBox(height: 16),
+
           Text(
             contact.name,
             maxLines: 1,
@@ -99,7 +115,9 @@ class ContactGridCardExtended extends StatelessWidget {
             style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17),
             textAlign: TextAlign.center,
           ),
+
           const SizedBox(height: 6),
+
           Text(
             contact.email ?? 'Chưa có email',
             maxLines: 1,
@@ -107,32 +125,39 @@ class ContactGridCardExtended extends StatelessWidget {
             style: TextStyle(fontSize: 13, color: dark ? Colors.grey[400] : Colors.grey[600]),
             textAlign: TextAlign.center,
           ),
+
           const SizedBox(height: 18),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(10),
-              color: dark ? const Color(0xFF334155) : const Color(0xFFF8FAFC),
-              border: Border.all(color: dark ? const Color(0xFF475569) : const Color(0xFFE2E8F0)),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.phone, size: 16),
-                const SizedBox(width: 6),
-                Flexible(
-                  child: Text(
-                    contact.phone,
-                    style: const TextStyle(fontSize: 13),
-                    overflow: TextOverflow.ellipsis,
+
+          // Phone pill: bấm vào là gọi (KHÔNG dùng IconButton bên trong để tránh double-tap area/rối layout)
+          InkWell(
+            onTap: () => _call(context),
+            borderRadius: BorderRadius.circular(10),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(10),
+                color: dark ? const Color(0xFF334155) : const Color(0xFFF8FAFC),
+                border: Border.all(color: dark ? const Color(0xFF475569) : const Color(0xFFE2E8F0)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.phone, size: 16, color: dark ? Colors.grey[200] : Colors.grey[700]),
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
+                      contact.phone,
+                      style: const TextStyle(fontSize: 13),
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
+
           const SizedBox(height: 20),
 
-          // Spacer đẩy action xuống đáy để card nhìn đầy
           const Spacer(),
 
           Row(
@@ -159,7 +184,11 @@ class ContactGridCardExtended extends StatelessWidget {
           color: dark ? const Color(0xFF334155) : const Color(0xFFF1F5F9),
           borderRadius: BorderRadius.circular(12),
         ),
-        child: Icon(icon, size: 18, color: color ?? (dark ? Colors.grey[200] : Colors.grey[700])),
+        child: Icon(
+          icon,
+          size: 18,
+          color: color ?? (dark ? Colors.grey[200] : Colors.grey[700]),
+        ),
       ),
     );
   }
@@ -179,19 +208,29 @@ class ContactGridCardExtended extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(color: col.withOpacity(.20), borderRadius: BorderRadius.circular(8)),
-      child: Text(group.label.toLowerCase(), style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: col)),
+      child: Text(
+        group.label.toLowerCase(),
+        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: col),
+      ),
     );
   }
 
   Color _mapColor(String c) {
     switch (c) {
-      case 'blue': return Colors.blue;
-      case 'pink': return Colors.pink;
-      case 'amber': return Colors.amber;
-      case 'green': return Colors.green;
-      case 'purple': return Colors.purple;
-      case 'red': return Colors.red;
-      default: return Colors.grey;
+      case 'blue':
+        return Colors.blue;
+      case 'pink':
+        return Colors.pink;
+      case 'amber':
+        return Colors.amber;
+      case 'green':
+        return Colors.green;
+      case 'purple':
+        return Colors.purple;
+      case 'red':
+        return Colors.red;
+      default:
+        return Colors.grey;
     }
   }
 }

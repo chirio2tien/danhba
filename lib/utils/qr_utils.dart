@@ -3,5 +3,11 @@ String buildMeCardData({
   required String phone,
   String? email,
 }) {
-  return 'MECARD:N:$name;TEL:$phone;EMAIL:${email ?? ''};;';
+  String esc(String s) => s.replaceAll(';', r'\;').replaceAll(':', r'\:').trim();
+
+  final n = esc(name);
+  final p = esc(phone);
+  final e = email == null ? '' : esc(email);
+
+  return 'MECARD:N:$n;TEL:$p;EMAIL:$e;;';
 }
